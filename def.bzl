@@ -64,6 +64,7 @@ def _valid_env_variable_name(name):
     return True
 
 def _gazelle_runner_impl(ctx):
+    runfiles = []
     args = [ctx.attr.command]
     if ctx.attr.mode:
         args.extend(["-mode", ctx.attr.mode])
@@ -81,11 +82,18 @@ def _gazelle_runner_impl(ctx):
 
     env = "\n".join(["export %s=%s" % (x, shell.quote(y)) for (x, y) in ctx.attr.env.items()])
 
+    # file_args absolute paths are found in the script
+    file_args = []
+    if ctx.attr.repo_config:
+        file_args.extend(["-repo_config", ctx.file.repo_config.path])
+        runfiles.append(ctx.file.repo_config)
+
     out_file = ctx.actions.declare_file(ctx.label.name + ".bash")
     go_tool = ctx.toolchains["@io_bazel_rules_go//go:toolchain"].sdk.go
     repo_config = ctx.file._repo_config
     substitutions = {
         "@@ARGS@@": shell.array_literal(args),
+        "@@FILE_ARGS@@": shell.array_literal(file_args),
         "@@GAZELLE_LABEL@@": shell.quote(str(ctx.attr.gazelle.label)),
         "@@GAZELLE_SHORT_PATH@@": shell.quote(ctx.executable.gazelle.short_path),
         "@@GENERATED_MESSAGE@@": """
@@ -103,10 +111,12 @@ def _gazelle_runner_impl(ctx):
         substitutions = substitutions,
         is_executable = True,
     )
-    runfiles = ctx.runfiles(files = [
+    runfiles = runfiles + [
         ctx.executable.gazelle,
         go_tool,
-    ] + ([repo_config] if repo_config else [])).merge(
+    ] + ([repo_config] if repo_config else []))
+    runfiles = ctx.runfiles(files = runfiles)
+    runfiles = runfiles.merge(
         ctx.attr.gazelle[DefaultInfo].default_runfiles,
     )
     for d in ctx.attr.data:
@@ -137,6 +147,7 @@ _gazelle_runner = rule(
             values = ["", "print", "fix", "diff"],
             default = "",
         ),
+        "repo_config": attr.label(allow_single_file = True),
         "external": attr.string(
             values = ["", "external", "static", "vendored"],
             default = "",
